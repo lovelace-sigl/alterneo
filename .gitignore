@@ -1,0 +1,36 @@
+# --- Secrets ---------------------------------------------------------------
+# Le dépôt est public : aucun secret ne doit y entrer.
+.env
+*.pem
+*.key
+
+# --- Java / Maven ----------------------------------------------------------
+target/
+*.jar
+*.war
+!.mvn/wrapper/maven-wrapper.jar
+.mvn/timing.properties
+
+# --- Node / React ----------------------------------------------------------
+node_modules/
+dist/
+.vite/
+*.local
+
+# --- Environnements de développement --------------------------------------
+.idea/
+*.iml
+*.ipr
+*.iws
+.vscode/
+.settings/
+.project
+.classpath
+
+# --- Système ---------------------------------------------------------------
+.DS_Store
+Thumbs.db
+
+# --- Journaux --------------------------------------------------------------
+*.log
+logs/

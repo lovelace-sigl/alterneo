@@ -1,0 +1,42 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+  <modelVersion>4.0.0</modelVersion>
+
+  <!--
+    POM parent du mono-dépôt Alterneo.
+
+    Il ne contient AUCUN code : il fixe la version de Java, la version de
+    Spring Boot et la liste des modules. Chaque service garde son propre
+    pom, son propre Dockerfile et son propre cycle de déploiement.
+
+    Pour changer de version de Spring Boot : une seule ligne, ci-dessous.
+  -->
+  <parent>
+    <groupId>org.springframework.boot</groupId>
+    <artifactId>spring-boot-starter-parent</artifactId>
+    <version>3.4.1</version>
+    <relativePath/>
+  </parent>
+
+  <groupId>fr.eseo.sigl</groupId>
+  <artifactId>alterneo</artifactId>
+  <version>1.0.0-SNAPSHOT</version>
+  <packaging>pom</packaging>
+
+  <name>Alterneo</name>
+  <description>Plate-forme de pilotage des projets et de suivi des apprentis</description>
+
+  <properties>
+    <java.version>21</java.version>
+    <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+  </properties>
+
+  <modules>
+    <module>services/apprentis</module>
+    <!-- Les autres services s'ajoutent ici au fur et à mesure :
+         gateway, projets, ressources, reunions, appreciations, notifications -->
+  </modules>
+
+</project>
