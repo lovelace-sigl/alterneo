@@ -1,0 +1,19 @@
+server:
+  port: ${APPRENTIS_PORT:8081}
+
+spring:
+  application:
+    name: apprentis
+
+# Seuls health et info sont exposés : on n'ouvre pas tout Actuator
+# sur un service joignable depuis le réseau.
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info
+  endpoint:
+    health:
+      probes:
+        enabled: true      # /actuator/health/liveness et /readiness
+      show-details: never
