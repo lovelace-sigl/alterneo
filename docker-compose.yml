@@ -1,0 +1,36 @@
+# ---------------------------------------------------------------------------
+# Environnement de développement local — Alterneo
+#
+#   docker compose up --build      démarre la plate-forme
+#   docker compose down            l'arrête
+#
+# Pour l'instant un seul service : le squelette Apprentis. Les briques
+# d'infrastructure (PostgreSQL, MongoDB, MinIO, RabbitMQ, Keycloak) et les
+# autres microservices s'ajouteront ici au fur et à mesure.
+# ---------------------------------------------------------------------------
+
+services:
+
+  apprentis:
+    build:
+      # Contexte à la racine : le Dockerfile a besoin du pom parent.
+      context: .
+      dockerfile: services/apprentis/Dockerfile
+    image: alterneo/apprentis:dev
+    container_name: alterneo-apprentis
+    ports:
+      - "8081:8081"
+    environment:
+      APPRENTIS_PORT: 8081
+      SPRING_PROFILES_ACTIVE: dev
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:8081/actuator/health"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 30s
+    restart: unless-stopped
+
+networks:
+  default:
+    name: alterneo
