@@ -1,0 +1,158 @@
+# ---------------------------------------------------------------------------
+# Intégration continue — Alterneo
+#
+# À chaque pull request vers main (et à chaque fusion sur main) :
+#   1. detect      — quels services ont changé ?
+#   2. build       — compile et teste UNIQUEMENT ceux-là, en parallèle
+#   3. analyse     — analyse SonarQube Cloud sur l'ensemble du dépôt
+#   4. ci-success  — verdict unique, vert ou rouge
+#
+# Pourquoi « ci-success » : la liste des services construits change d'une
+# pull request à l'autre, on ne peut donc pas exiger « build (apprentis) »
+# dans la protection de branche. « ci-success » est toujours présent, quel
+# que soit le service touché : c'est LUI qu'on met en check obligatoire.
+#
+# Pourquoi deux chemins de build (matrice + analyse) : la matrice donne un
+# retour rapide et ciblé sur ce qui change, l'analyse couvre le projet
+# entier parce que SonarQube Cloud n'a qu'un seul projet pour tout le
+# dépôt. Aujourd'hui, avec un seul service, cela construit deux fois ;
+# quand les six services seront là, on pourra passer Sonar en mode
+# monorepo (un projet par service) si le temps de CI devient gênant.
+# ---------------------------------------------------------------------------
+name: CI
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+
+  # --- 1. Quels services ont changé ? --------------------------------------
+  detect:
+    runs-on: ubuntu-latest
+    outputs:
+      services: ${{ steps.filter.outputs.changes }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dorny/paths-filter@v3
+        id: filter
+        with:
+          # Une entrée par service. Le pom parent est listé partout :
+          # le modifier affecte tous les services, donc tous doivent
+          # être reconstruits.
+          filters: |
+            apprentis:
+              - 'services/apprentis/**'
+              - 'pom.xml'
+            # gateway:
+            #   - 'services/gateway/**'
+            #   - 'pom.xml'
+            # projets:
+            #   - 'services/projets/**'
+            #   - 'pom.xml'
+            # ressources:
+            #   - 'services/ressources/**'
+            #   - 'pom.xml'
+            # reunions:
+            #   - 'services/reunions/**'
+            #   - 'pom.xml'
+            # appreciations:
+            #   - 'services/appreciations/**'
+            #   - 'pom.xml'
+            # notifications:
+            #   - 'services/notifications/**'
+            #   - 'pom.xml'
+
+  # --- 2. Construire et tester chaque service changé -----------------------
+  build:
+    needs: detect
+    if: ${{ needs.detect.outputs.services != '[]' }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        service: ${{ fromJSON(needs.detect.outputs.services) }}
+    name: build ${{ matrix.service }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Installer Java 21
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+          cache: maven
+
+      - name: Compiler et tester
+        run: mvn -B -pl services/${{ matrix.service }} -am verify
+
+  # --- 3. Analyse SonarQube Cloud ------------------------------------------
+  analyse:
+    needs: detect
+    if: ${{ needs.detect.outputs.services != '[]' }}
+    name: analyse SonarQube Cloud
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # Sonar a besoin de tout l'historique pour attribuer les lignes
+          # et distinguer le « code neuf » du reste.
+          fetch-depth: 0
+
+      - name: Installer Java 21
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+          cache: maven
+
+      - name: Cache SonarQube Cloud
+        uses: actions/cache@v4
+        with:
+          path: ~/.sonar/cache
+          key: ${{ runner.os }}-sonar
+          restore-keys: ${{ runner.os }}-sonar
+
+      # L'organisation, la clé de projet et l'URL sont dans le pom parent.
+      # Seul le jeton vient d'ici, depuis les secrets du dépôt.
+      #
+      # Note : le plugin n'est pas épinglé sur une version, Maven prend la
+      # dernière. C'est ce que recommande la documentation Sonar, mais pour
+      # une CI parfaitement reproductible, relève la version résolue dans
+      # les logs et épingle-la dans le pom.
+      #
+      # Pas de -Dsonar.qualitygate.wait=true pour l'instant : Sonar REMONTE
+      # les chiffres sans bloquer la fusion. On durcira la Quality Gate au
+      # Sprint 2, quand il y aura du vrai code à couvrir.
+      - name: Construire, tester et analyser
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+        run: >
+          mvn -B verify
+          org.sonarsource.scanner.maven:sonar-maven-plugin:sonar
+
+  # --- 4. Verdict unique, toujours présent ---------------------------------
+  ci-success:
+    needs: [build, analyse]
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Vérifier que tout est au vert
+        run: |
+          build="${{ needs.build.result }}"
+          analyse="${{ needs.analyse.result }}"
+          echo "build=$build  analyse=$analyse"
+          # 'skipped' = aucun service touché (ex. pull request de docs).
+          for resultat in "$build" "$analyse"; do
+            if [ "$resultat" = "failure" ] || [ "$resultat" = "cancelled" ]; then
+              echo "Intégration continue en échec."
+              exit 1
+            fi
+          done
+          echo "Intégration continue au vert."

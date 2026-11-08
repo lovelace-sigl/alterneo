@@ -8,8 +8,9 @@
     POM parent du mono-dépôt Alterneo.
 
     Il ne contient AUCUN code : il fixe la version de Java, la version de
-    Spring Boot et la liste des modules. Chaque service garde son propre
-    pom, son propre Dockerfile et son propre cycle de déploiement.
+    Spring Boot, la mesure de couverture et la configuration SonarQube
+    Cloud. Chaque service garde son propre pom, son propre Dockerfile et
+    son propre cycle de déploiement.
 
     Pour changer de version de Spring Boot : une seule ligne, ci-dessous.
   -->
@@ -31,6 +32,13 @@
   <properties>
     <java.version>21</java.version>
     <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+
+    <!-- SonarQube Cloud : un seul projet pour tout le mono-dépôt.
+         Ces valeurs viennent de sonarcloud.io ; le jeton, lui, n'est
+         JAMAIS ici : il est dans le secret GitHub SONAR_TOKEN. -->
+    <sonar.organization>lovelace-sigl</sonar.organization>
+    <sonar.projectKey>lovelace-sigl_alterneo</sonar.projectKey>
+    <sonar.host.url>https://sonarcloud.io</sonar.host.url>
   </properties>
 
   <modules>
@@ -38,5 +46,37 @@
     <!-- Les autres services s'ajoutent ici au fur et à mesure :
          gateway, projets, ressources, reunions, appreciations, notifications -->
   </modules>
+
+  <build>
+    <plugins>
+      <!--
+        JaCoCo mesure la couverture de tests. Déclaré ici, dans le parent,
+        il s'applique automatiquement à tous les services : chacun produit
+        son target/site/jacoco/jacoco.xml, que Sonar lit ensuite.
+
+        Sans lui, SonarQube Cloud afficherait 0 % de couverture.
+      -->
+      <plugin>
+        <groupId>org.jacoco</groupId>
+        <artifactId>jacoco-maven-plugin</artifactId>
+        <version>0.8.12</version>
+        <executions>
+          <execution>
+            <id>prepare-agent</id>
+            <goals>
+              <goal>prepare-agent</goal>
+            </goals>
+          </execution>
+          <execution>
+            <id>report</id>
+            <phase>verify</phase>
+            <goals>
+              <goal>report</goal>
+            </goals>
+          </execution>
+        </executions>
+      </plugin>
+    </plugins>
+  </build>
 
 </project>
