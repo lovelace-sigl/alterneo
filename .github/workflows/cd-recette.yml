@@ -1,0 +1,68 @@
+# ---------------------------------------------------------------------------
+# Déploiement continu — environnement de RECETTE (T04)
+#
+# À chaque fusion sur main :
+#   1. construire l'image du service apprentis
+#   2. la pousser sur GitHub Container Registry (ghcr.io, gratuit)
+#   3. se connecter à Azure en OIDC (aucun secret stocké)
+#   4. mettre à jour l'application conteneur avec la nouvelle image
+#
+# Prérequis (faits) : provision.sh, setup-oidc.sh, et les 3 secrets
+# AZURE_CLIENT_ID / AZURE_TENANT_ID / AZURE_SUBSCRIPTION_ID.
+#
+# /!\ APRÈS LA PREMIÈRE EXÉCUTION : rends le paquet ghcr PUBLIC
+#     (page du dépôt → Packages → apprentis → Package settings →
+#      Change visibility → Public). Sinon Azure ne peut pas tirer
+#     l'image. Une seule fois ; ensuite tout est automatique.
+# ---------------------------------------------------------------------------
+name: CD recette
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+  packages: write      # pousser l'image sur ghcr.io
+  id-token: write      # OIDC vers Azure
+
+env:
+  IMAGE: ghcr.io/lovelace-sigl/apprentis
+
+jobs:
+  deploy:
+    name: déployer apprentis sur la recette
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - name: Construire et pousser l'image sur ghcr.io
+        run: |
+          echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u ${{ github.actor }} --password-stdin
+          docker build -f services/apprentis/Dockerfile \
+            -t "$IMAGE:${{ github.sha }}" -t "$IMAGE:latest" .
+          docker push "$IMAGE:${{ github.sha }}"
+          docker push "$IMAGE:latest"
+
+      - name: Connexion à Azure (OIDC, sans secret)
+        uses: azure/login@7184910d9eb2b1c5e48f7073824a90609bb9b6d6 # v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Déployer la nouvelle image sur Container Apps
+        run: |
+          # Le vrai service écoute sur 8081 (le conteneur témoin était sur 80).
+          az containerapp ingress update \
+            --name apprentis --resource-group alterneo-recette \
+            --target-port 8081
+          az containerapp update \
+            --name apprentis --resource-group alterneo-recette \
+            --image "$IMAGE:${{ github.sha }}"
+
+      - name: Afficher l'URL
+        run: |
+          fqdn=$(az containerapp show --name apprentis --resource-group alterneo-recette \
+                   --query properties.configuration.ingress.fqdn -o tsv)
+          echo "Déployé sur https://$fqdn/api/apprentis/ping"
