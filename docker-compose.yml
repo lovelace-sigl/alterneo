@@ -1,16 +1,90 @@
 # ---------------------------------------------------------------------------
 # Environnement de développement local — Alterneo
 #
+#   cp .env.example .env           À FAIRE UNE FOIS, avant tout le reste
 #   docker compose up --build      démarre la plate-forme
-#   docker compose down            l'arrête
+#   docker compose down            l'arrête (les données sont conservées)
+#   docker compose down -v         l'arrête ET efface les bases
 #
-# Pour l'instant un seul service : le squelette Apprentis. Les briques
-# d'infrastructure (PostgreSQL, MongoDB, MinIO, RabbitMQ, Keycloak) et les
-# autres microservices s'ajouteront ici au fur et à mesure.
+# Trois conteneurs aujourd'hui :
+#   postgres   5432   le serveur de bases partagé (ADR-002)
+#   keycloak   8180   l'authentification
+#   apprentis  8081   le premier microservice
+#
+# Les briques restantes (MongoDB, MinIO, RabbitMQ, la passerelle et les
+# cinq autres microservices) s'ajouteront ici au fur et à mesure.
 # ---------------------------------------------------------------------------
 
 services:
 
+  # --- Serveur de bases de données ----------------------------------------
+  # Un seul serveur, une base et un compte par service : c'est l'ADR-002.
+  # Le script infra/postgres/init.sh crée les cinq bases au premier
+  # démarrage. Les mots de passe viennent de .env, jamais du dépôt.
+  postgres:
+    image: postgres:16-alpine
+    container_name: alterneo-postgres
+    environment:
+      # Compte administrateur du serveur.
+      POSTGRES_USER: ${POSTGRES_ADMIN_USER:-alterneo_admin}
+      POSTGRES_PASSWORD: ${POSTGRES_ADMIN_PASSWORD:?Manquant — fais « cp .env.example .env » puis renseigne les mots de passe}
+      POSTGRES_DB: postgres
+      # Mot de passe des cinq comptes de service, lu par init.sh.
+      # En local, un seul suffit : l'isolation vient des DROITS (chaque
+      # compte ne voit que sa base), pas de la distinction des mots de
+      # passe. En recette et en production, chaque service a son propre
+      # secret dans Azure Key Vault.
+      SERVICE_DB_PASSWORD: ${SERVICE_DB_PASSWORD:?Manquant — voir .env.example}
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+      # /!\ Les scripts de ce répertoire ne sont exécutés QU'AU PREMIER
+      #     démarrage, sur un volume vide. Si tu modifies init.sh ensuite,
+      #     il faut « docker compose down -v » pour qu'il rejoue.
+      - ./infra/postgres/init.sh:/docker-entrypoint-initdb.d/00-init.sh:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_ADMIN_USER:-alterneo_admin} -d postgres"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+    restart: unless-stopped
+
+  # --- Authentification ----------------------------------------------------
+  # Mode « start-dev » : base H2 interne, et le realm est RÉIMPORTÉ à chaque
+  # démarrage depuis infra/keycloak/realm-alterneo.json. Conséquence
+  # volontaire : le fichier commité est toujours la vérité, la configuration
+  # ne peut pas dériver en silence d'une machine à l'autre.
+  #
+  # La base keycloak_db existe déjà côté Postgres : elle sera utilisée en
+  # recette et en production, où la configuration doit persister.
+  keycloak:
+    image: quay.io/keycloak/keycloak:26.0
+    container_name: alterneo-keycloak
+    command: ["start-dev", "--import-realm"]
+    environment:
+      # Keycloak 26 ; sur une version ≤ 25 ces variables s'appellent
+      # KEYCLOAK_ADMIN et KEYCLOAK_ADMIN_PASSWORD.
+      KC_BOOTSTRAP_ADMIN_USERNAME: ${KEYCLOAK_ADMIN:-admin}
+      KC_BOOTSTRAP_ADMIN_PASSWORD: ${KEYCLOAK_ADMIN_PASSWORD:?Manquant — voir .env.example}
+      KC_HTTP_PORT: 8180
+      KC_HOSTNAME_STRICT: "false"
+    ports:
+      - "${KEYCLOAK_PORT:-8180}:8180"
+    volumes:
+      - ./infra/keycloak/realm-alterneo.json:/opt/keycloak/data/import/realm-alterneo.json:ro
+    healthcheck:
+      # L'image ne contient ni curl ni wget : on se contente de vérifier que
+      # le port répond. Pour savoir si le realm est bien importé, ouvrir
+      # http://localhost:8180/realms/alterneo/.well-known/openid-configuration
+      test: ["CMD-SHELL", "exec 3<>/dev/tcp/127.0.0.1/8180"]
+      interval: 10s
+      timeout: 3s
+      retries: 12
+      start_period: 30s
+    restart: unless-stopped
+
+  # --- Microservice Apprentis & alternance ---------------------------------
   apprentis:
     build:
       # Contexte à la racine : le Dockerfile a besoin du pom parent.
@@ -18,11 +92,22 @@ services:
       dockerfile: services/apprentis/Dockerfile
     image: alterneo/apprentis:dev
     container_name: alterneo-apprentis
+    depends_on:
+      postgres:
+        condition: service_healthy
     ports:
       - "8081:8081"
     environment:
       APPRENTIS_PORT: 8081
       SPRING_PROFILES_ACTIVE: dev
+      # La prise est déjà branchée : dès que spring-boot-starter-data-jpa
+      # et le pilote PostgreSQL entrent dans services/apprentis/pom.xml,
+      # Spring Boot lit ces trois variables tout seul. Rien à ajouter dans
+      # application.yml. Tant que JPA n'est pas sur le classpath, elles
+      # sont simplement ignorées.
+      SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/apprentis_db
+      SPRING_DATASOURCE_USERNAME: apprentis
+      SPRING_DATASOURCE_PASSWORD: ${SERVICE_DB_PASSWORD:?Manquant — voir .env.example}
     healthcheck:
       test: ["CMD", "wget", "-qO-", "http://localhost:8081/actuator/health"]
       interval: 10s
@@ -30,6 +115,10 @@ services:
       retries: 5
       start_period: 30s
     restart: unless-stopped
+
+volumes:
+  postgres-data:
+    name: alterneo-postgres-data
 
 networks:
   default:
