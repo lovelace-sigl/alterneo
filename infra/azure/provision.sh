@@ -41,8 +41,8 @@ az extension add --name containerapp --upgrade --only-show-errors
 # Sur une souscription neuve, ces fournisseurs doivent être enregistrés.
 # L'enregistrement peut prendre 1 à 2 minutes ; si une étape suivante
 # échoue avec « provider not registered », attends un peu et relance.
-az provider register --namespace Microsoft.App --only-show-errors
-az provider register --namespace Microsoft.OperationalInsights --only-show-errors
+az provider register --namespace Microsoft.App --wait --only-show-errors
+az provider register --namespace Microsoft.OperationalInsights --wait --only-show-errors
 
 echo "== Groupe de ressources =="
 az group create --name "$RESOURCE_GROUP" --location "$LOCATION" -o table
