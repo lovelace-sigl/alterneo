@@ -7,13 +7,19 @@
 #   3. se connecter à Azure en OIDC (aucun secret stocké)
 #   4. mettre à jour l'application conteneur avec la nouvelle image
 #
-# Prérequis (faits) : provision.sh, setup-oidc.sh, et les 3 secrets
-# AZURE_CLIENT_ID / AZURE_TENANT_ID / AZURE_SUBSCRIPTION_ID.
+# Prérequis, faits une fois pour toutes par infra/azure/ :
+#   · provision.sh    crée le groupe, l'environnement et l'application,
+#                     et aligne le port d'ingress sur le service
+#   · setup-oidc.sh   crée l'identité managée et la credential fédérée
+#   · les 3 secrets AZURE_CLIENT_ID / AZURE_TENANT_ID / AZURE_SUBSCRIPTION_ID
+#   · le paquet ghcr.io/lovelace-sigl/apprentis rendu PUBLIC, sinon Azure
+#     ne peut pas tirer l'image
 #
-# /!\ APRÈS LA PREMIÈRE EXÉCUTION : rends le paquet ghcr PUBLIC
-#     (page du dépôt → Packages → apprentis → Package settings →
-#      Change visibility → Public). Sinon Azure ne peut pas tirer
-#     l'image. Une seule fois ; ensuite tout est automatique.
+# Ce workflow ne fait QUE déployer : il ne configure pas l'infrastructure.
+# Toute commande qui modifie la forme de l'application (port, ressources,
+# variables, montages) appartient à provision.sh, pas ici. Sinon elle est
+# rejouée à chaque fusion, elle ralentit le déploiement et elle échoue un
+# jour sur deux en ServerTimeout.
 # ---------------------------------------------------------------------------
 name: CD recette
 
@@ -54,10 +60,6 @@ jobs:
 
       - name: Déployer la nouvelle image sur Container Apps
         run: |
-          # Le vrai service écoute sur 8081 (le conteneur témoin était sur 80).
-          az containerapp ingress update \
-            --name apprentis --resource-group alterneo-recette \
-            --target-port 8081
           az containerapp update \
             --name apprentis --resource-group alterneo-recette \
             --image "$IMAGE:${{ github.sha }}"
